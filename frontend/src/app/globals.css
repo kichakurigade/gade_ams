@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 218 58% 25%;       /* brand navy #1B3A6B */
+    --primary-foreground: 0 0% 98%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 214 32% 91%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 37 63% 47%;         /* brand gold #C4922A */
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 218 58% 25%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+/* Gade AMS — utility classes */
+.ams-page-title {
+  @apply text-2xl font-semibold text-foreground tracking-tight;
+}
+
+.ams-section-title {
+  @apply text-sm font-semibold text-foreground uppercase tracking-widest;
+}
+
+.risk-badge-normal {
+  @apply bg-green-50 text-green-700 border border-green-200;
+}
+.risk-badge-gtn {
+  @apply bg-amber-50 text-amber-700 border border-amber-200;
+}
+.risk-badge-mgtn {
+  @apply bg-red-50 text-red-700 border border-red-200;
+}

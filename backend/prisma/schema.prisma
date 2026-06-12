@@ -1,0 +1,896 @@
+// ─── Gade AMS — Prisma Schema ─────────────────────────────────────────────────
+// Single-firm audit management system for Gade Associates (P051591395M)
+// All design decisions: see AMS_PROJECT_CONTEXT.md
+// Rule: Lead schedule totals and FS figures are NEVER stored — computed on-the-fly.
+// Rule: audit_log, review_comments, program_step_overrides are INSERT-ONLY.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum UserRole {
+  MANAGING_PARTNER
+  ASSURANCE_PARTNER
+  PROFESSIONAL_STAFF
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum EngagementStatus {
+  ACCEPTANCE
+  PLANNING
+  EXECUTION
+  COMPLETION
+  SIGNED
+  DECLINED
+  WITHDRAWN
+}
+
+enum RiskClassification {
+  NORMAL
+  GTN    // Greater Than Normal
+  MGTN   // Much Greater Than Normal
+}
+
+enum FsFramework {
+  IFRS_FOR_SMES
+  FULL_IFRS
+  IPSAS_ACCRUAL
+}
+
+enum MaterialityBasis {
+  PBT
+  TOTAL_ASSETS
+  REVENUE
+  EXPENDITURE
+  NET_ASSETS
+  MANUAL_OVERRIDE
+}
+
+enum RmmLevel {
+  LOW
+  MEDIUM
+  HIGH
+  SIGNIFICANT
+}
+
+enum AjeStatus {
+  PROPOSED
+  AGREED
+  WAIVED
+}
+
+enum WpStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  RETURNED
+  APPROVED   // Terminal — cannot be reversed at any tier
+}
+
+enum WpVersionStatus {
+  CURRENT
+  SUPERSEDED
+  APPROVED
+}
+
+enum TbImportStatus {
+  ACTIVE
+  SUPERSEDED
+}
+
+enum ProcedureRequirementLevel {
+  MANDATORY_ALL
+  REQUIRED_HIGH
+  RECOMMENDED_MEDIUM
+  OPTIONAL
+}
+
+enum TriggerCondition {
+  ANY
+  MEDIUM_AND_ABOVE
+  HIGH_ONLY
+  SIGNIFICANT_ONLY
+}
+
+enum ProgramStepOverrideType {
+  ADD
+  REMOVE
+  REASSIGN
+  RETIMING
+  LEVEL_CHANGE
+}
+
+enum GateStatus {
+  PENDING
+  PASSED
+  FAILED
+  BYPASSED
+}
+
+enum ReportType {
+  UNMODIFIED
+  QUALIFIED
+  ADVERSE
+  DISCLAIMER
+}
+
+enum NotificationTrigger {
+  REVIEW_ASSIGNED
+  REVIEW_RETURNED
+  REVIEW_APPROVED
+  DEADLINE_7_DAYS
+  DEADLINE_3_DAYS
+  DEADLINE_1_DAY
+  GATE_FAILURE
+  OVERDUE_REVIEW
+}
+
+enum AuditAreaApproach {
+  SUBSTANTIVE
+  COMBINED
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USERS & FIRM
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model User {
+  id                  String     @id @default(cuid())
+  email               String     @unique
+  passwordHash        String
+  /// TOTP secret — encrypted at application layer with ENCRYPTION_MASTER_KEY
+  totpSecret          String?
+  totpEnabled         Boolean    @default(false)
+  totpVerifiedAt      DateTime?
+  firstName           String
+  lastName            String
+  role                UserRole
+  status              UserStatus @default(ACTIVE)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+  lastLoginAt         DateTime?
+  passwordChangedAt   DateTime?
+
+  // Relations
+  engagementTeams       EngagementTeam[]
+  independenceChecks    IndependenceCheck[]
+  uploadedVersions      WorkingPaperVersion[]
+  reviewComments        ReviewComment[]
+  proposedAjes          AdjustingJournalEntry[] @relation("ProposedBy")
+  reviewedAjes          AdjustingJournalEntry[] @relation("ReviewedBy")
+  materialityVersions   MaterialityVersion[]
+  programStepOverrides  ProgramStepOverride[]
+  eqrRecords            EqrRecord[]
+  lockedNarratives      NotesNarrative[]
+  auditLogs             AuditLog[]
+  notifications         Notification[]
+
+  @@map("users")
+}
+
+/// Singleton — only one row ever (id = 1)
+model FirmSettings {
+  id                    Int      @id @default(1)
+  firmName              String   @default("Gade Associates")
+  firmPin               String   @default("P051591395M")
+  /// Default PeM as % of PM (ISA 320 — typically 50–75%)
+  defaultPemPercent     Float    @default(75.0)
+  /// Trivial threshold as % of PM (firm policy: 5%)
+  defaultTrivialPercent Float    @default(5.0)
+  logoPath              String?
+  updatedAt             DateTime @updatedAt
+
+  @@map("firm_settings")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLIENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model Client {
+  id              String   @id @default(cuid())
+  /// e.g. "H001" — shared with billing system in A01.Admin/01_Clients/
+  clientCode      String   @unique
+  clientName      String
+  entityType      String?
+  kraPin          String?
+  registrationNo  String?
+  industry        String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  engagements     Engagement[]
+  accountMappings AccountMapping[]
+  kycEvaluations  KycAmlEvaluation[]
+
+  @@map("clients")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENGAGEMENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model Engagement {
+  id                 String             @id @default(cuid())
+  clientId           String
+  client             Client             @relation(fields: [clientId], references: [id])
+  /// e.g. "H001-2025" — unique per client per year
+  engagementCode     String             @unique
+  periodStart        DateTime
+  periodEnd          DateTime
+  reportDate         DateTime?
+  fsFramework        FsFramework
+  status             EngagementStatus   @default(ACCEPTANCE)
+  riskClassification RiskClassification?
+  /// Auto-set true when riskClassification = GTN or MGTN
+  eqrRequired        Boolean            @default(false)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  createdBy          String
+
+  // Relations — all phases downstream
+  team                EngagementTeam[]
+  acceptance          EngagementAcceptance?
+  kycEvaluation       KycAmlEvaluation?
+  materialityVersions MaterialityVersion[]
+  riskAssessments     RiskAssessment[]
+  auditStrategy       AuditStrategy?
+  auditPrograms       AuditProgram[]
+  tbImports           TrialBalanceImport[]
+  ajeList             AdjustingJournalEntry[]
+  workingPapers       WorkingPaper[]
+  eqrRecord           EqrRecord?
+  completionGates     CompletionGate[]
+  notesNarrative      NotesNarrative[]
+  auditReport         AuditReport?
+
+  @@map("engagements")
+}
+
+model EngagementTeam {
+  id           String     @id @default(cuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  /// "ENGAGEMENT_PARTNER" | "EQR_REVIEWER" | "MANAGER" | "SENIOR" | "STAFF"
+  teamRole     String
+  assignedAt   DateTime   @default(now())
+  removedAt    DateTime?
+
+  @@unique([engagementId, userId])
+  @@map("engagement_team")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 2 — ACCEPTANCE (Module 5: P003, Module 6: KYC/AML)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model EngagementAcceptance {
+  id           String     @id @default(cuid())
+  engagementId String     @unique
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+
+  /// Governance scoring: 7 factors × max 3 points = 21 max
+  /// Normal ≤ 9, GTN 10–15, MGTN 16–21
+  govScore     Int?
+  /// JSON array of flagged governance issues
+  govFlags     Json?
+
+  riskClassification  RiskClassification?
+  classificationReason String?
+
+  independenceCleared   Boolean  @default(false)
+  independenceClearedAt DateTime?
+
+  /// 3-tier approval: Preparer → Reviewer → Approving Partner
+  preparedBy   String?
+  preparedAt   DateTime?
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  approvedBy   String?
+  approvedAt   DateTime?
+  declinedBy   String?
+  declinedAt   DateTime?
+  declineReason String?
+
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  independenceChecks IndependenceCheck[]
+
+  @@map("engagement_acceptance")
+}
+
+/// One row per team member per engagement — independence declaration at acceptance
+model IndependenceCheck {
+  id           String               @id @default(cuid())
+  acceptanceId String
+  acceptance   EngagementAcceptance @relation(fields: [acceptanceId], references: [id])
+  userId       String
+  user         User                 @relation(fields: [userId], references: [id])
+  isIndependent Boolean
+  /// JSON array: {threatType, description}
+  threats      Json?
+  /// JSON array: {safeguardType, description}
+  safeguards   Json?
+  declaredAt   DateTime             @default(now())
+  notes        String?
+
+  @@unique([acceptanceId, userId])
+  @@map("independence_checks")
+}
+
+/// POCAMLA Cap. 59B compliance + KDPA 2019 data protection
+model KycAmlEvaluation {
+  id           String     @id @default(cuid())
+  engagementId String     @unique
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  clientId     String
+  client       Client     @relation(fields: [clientId], references: [id])
+
+  uboName      String?
+  uboPinOrId   String?
+  isPep        Boolean    @default(false)
+  pepDetails   String?
+
+  unSanctionsCheck  Boolean @default(false)
+  ofacSanctionsCheck Boolean @default(false)
+  sanctionsCleared  Boolean @default(false)
+  sanctionsClearedAt DateTime?
+
+  /// 7-factor AML score (max 21): Low 7–10, Medium 11–15, High 16–21
+  amlScore     Int?
+  /// JSON: {factorCode, factorName, score, notes}[]
+  amlFactors   Json?
+
+  /// "PROCEED" | "ENHANCED_MONITORING" | "DECLINE"
+  riskDecision        String?
+  epApprovalRequired  Boolean  @default(false)
+  epApprovedBy        String?
+  epApprovedAt        DateTime?
+
+  /// KDPA 2019 — data subject notified
+  dataProtectionNoticeGiven Boolean  @default(false)
+  dataProtectionNoticeDate  DateTime?
+
+  completedBy  String?
+  completedAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@map("kyc_aml_evaluations")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 3 — PLANNING (Modules 7–11)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// ISA 320 — every change creates a new version; prior version isActive = false
+model MaterialityVersion {
+  id              String           @id @default(cuid())
+  engagementId    String
+  engagement      Engagement       @relation(fields: [engagementId], references: [id])
+  versionNumber   Int
+  isActive        Boolean          @default(true)
+
+  basis           MaterialityBasis
+  /// TB figure used as the basis (snapshot at time of computation)
+  basisAmount     Float
+  basisPercentage Float
+  /// Planning Materiality = basisAmount × basisPercentage / 100
+  pm              Float
+  /// PeM as % of PM (default 75% per firm settings)
+  pemPercentage   Float
+  /// Performance Materiality = pm × pemPercentage / 100
+  pem             Float
+  trivialPercentage Float          @default(5.0)
+  /// Trivial = pm × trivialPercentage / 100
+  trivialAmount   Float
+  manualOverrideJustification String?
+  /// Flagged when PBT basis selected and YoY swing > 50%
+  pbtVolatilityFlag Boolean        @default(false)
+
+  setBy        String
+  user         User               @relation(fields: [setBy], references: [id])
+  setAt        DateTime           @default(now())
+  supersededAt DateTime?
+  revisionReason String?
+
+  @@unique([engagementId, versionNumber])
+  @@map("materiality_versions")
+}
+
+/// ISA 315 — seeded risk types library (admin-managed, not per-engagement)
+model RiskType {
+  id                      String   @id @default(cuid())
+  riskTypeCode            String   @unique
+  riskName                String
+  /// Lead schedule code (A-W) or "ENTITY" for entity-level risks
+  areaCode                String
+  isaReference            String?
+  /// true for ISA mandatory risks (management override, revenue recognition fraud)
+  isAlwaysAssessed        Boolean  @default(false)
+  /// false for ISA mandatory risks that cannot be rebutted
+  isRebuttable            Boolean  @default(true)
+  defaultLevel            RmmLevel @default(LOW)
+  significantRiskCriteria String?
+  isSeeded                Boolean  @default(true)
+  isActive                Boolean  @default(true)
+
+  riskAssessments   RiskAssessment[]
+  procedureMappings RiskProcedureMapping[]
+
+  @@map("risk_types")
+}
+
+model RiskAssessment {
+  id              String     @id @default(cuid())
+  engagementId    String
+  engagement      Engagement @relation(fields: [engagementId], references: [id])
+  riskTypeId      String
+  riskType        RiskType   @relation(fields: [riskTypeId], references: [id])
+
+  rmmLevel        RmmLevel
+  isSignificant   Boolean    @default(false)
+  inherentRisk    RmmLevel?
+  controlRisk     RmmLevel?
+  riskDescription String?
+  mitigatingFactors String?
+  /// Required for significant risks per ISA 315.27
+  isaResponse     String?
+
+  /// Source tracking
+  fromAcceptance  Boolean    @default(false)
+  fromTbAnalytics Boolean    @default(false)
+  fromIsaMandatory Boolean   @default(false)
+
+  assessedBy  String?
+  assessedAt  DateTime?
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  /// Locked when EP confirms audit strategy
+  isLocked    Boolean    @default(false)
+
+  @@unique([engagementId, riskTypeId])
+  @@map("risk_assessments")
+}
+
+model AuditStrategy {
+  id           String     @id @default(cuid())
+  engagementId String     @unique
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  /// Auto-drafted narrative from risk register
+  strategyText String?
+  eqrTriggered Boolean    @default(false)
+  confirmedBy  String?
+  confirmedAt  DateTime?
+  isLocked     Boolean    @default(false)
+
+  areaStrategies AreaStrategy[]
+
+  @@map("audit_strategy")
+}
+
+model AreaStrategy {
+  id         String        @id @default(cuid())
+  strategyId String
+  strategy   AuditStrategy @relation(fields: [strategyId], references: [id])
+  /// Lead schedule code A-W
+  areaCode   String
+  approach   AuditAreaApproach
+  notes      String?
+
+  @@unique([strategyId, areaCode])
+  @@map("area_strategies")
+}
+
+// ─── Procedure Library (admin-seeded, version-tracked) ───────────────────────
+
+model ProcedureLibrary {
+  id                   String                    @id @default(cuid())
+  procedureCode        String                    @unique
+  /// Lead schedule code A-W
+  areaCode             String
+  /// ISA assertions: EXISTENCE | COMPLETENESS | VALUATION | RIGHTS | CUTOFF | CLASSIFICATION | OCCURRENCE | ACCURACY | UNDERSTANDABILITY
+  assertions           String[]
+  procedureText        String
+  wpTemplateHint       String?
+  isaReference         String?
+  icpakReference       String?
+  baseReqLevel         ProcedureRequirementLevel
+  applicableFrameworks FsFramework[]
+  isCustom             Boolean                   @default(false)
+  isActive             Boolean                   @default(true)
+  version              Int                       @default(1)
+
+  riskMappings RiskProcedureMapping[]
+  programSteps AuditProgramStep[]
+
+  @@map("procedure_library")
+}
+
+model RiskProcedureMapping {
+  id                    String                     @id @default(cuid())
+  procedureId           String
+  procedure             ProcedureLibrary           @relation(fields: [procedureId], references: [id])
+  riskTypeId            String
+  riskType              RiskType                   @relation(fields: [riskTypeId], references: [id])
+  triggerCondition      TriggerCondition
+  inclusionLevelOverride ProcedureRequirementLevel?
+
+  @@unique([procedureId, riskTypeId])
+  @@map("risk_procedure_mappings")
+}
+
+model AuditProgram {
+  id           String     @id @default(cuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  /// Lead schedule code A-W
+  areaCode     String
+  generatedAt  DateTime   @default(now())
+  confirmedBy  String?
+  confirmedAt  DateTime?
+  isLocked     Boolean    @default(false)
+
+  steps AuditProgramStep[]
+
+  @@unique([engagementId, areaCode])
+  @@map("audit_programs")
+}
+
+model AuditProgramStep {
+  id             String                    @id @default(cuid())
+  programId      String
+  program        AuditProgram              @relation(fields: [programId], references: [id])
+  procedureId    String
+  procedure      ProcedureLibrary          @relation(fields: [procedureId], references: [id])
+  stepNumber     Int
+  inclusionLevel ProcedureRequirementLevel
+  isMandatory    Boolean                   @default(false)
+  completedBy    String?
+  completedAt    DateTime?
+  wpRef          String?
+  conclusion     String?
+
+  overrides ProgramStepOverride[]
+
+  @@map("audit_program_steps")
+}
+
+/// INSERT-ONLY — PostgreSQL permissions prevent UPDATE and DELETE at DB layer
+model ProgramStepOverride {
+  id            String                  @id @default(cuid())
+  stepId        String
+  step          AuditProgramStep        @relation(fields: [stepId], references: [id])
+  overrideType  ProgramStepOverrideType
+  overrideBy    String
+  user          User                    @relation(fields: [overrideBy], references: [id])
+  overrideAt    DateTime                @default(now())
+  reason        String
+  apConfirmedBy String?
+  apConfirmedAt DateTime?
+
+  @@map("program_step_overrides")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 4 — EXECUTION (Modules 12–17)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model TrialBalanceImport {
+  id             String        @id @default(cuid())
+  engagementId   String
+  engagement     Engagement    @relation(fields: [engagementId], references: [id])
+  importDate     DateTime      @default(now())
+  sourceFilename String
+  /// Encrypted file path (AES-256-GCM, served through auth layer only)
+  filePath       String
+  encryptionKeyRef String
+  status         TbImportStatus @default(ACTIVE)
+  importedBy     String
+  /// Saved column mapping for reuse in next year's import
+  columnMap      Json
+  totalDebit     Float
+  totalCredit    Float
+
+  accounts TbAccount[]
+
+  @@map("trial_balance_imports")
+}
+
+model TbAccount {
+  id                 String             @id @default(cuid())
+  importId           String
+  import             TrialBalanceImport @relation(fields: [importId], references: [id])
+  accountCode        String
+  accountDescription String
+  cyDebit            Float              @default(0)
+  cyCredit           Float              @default(0)
+  /// cyDebit - cyCredit (sign convention: positive = debit balance)
+  cyNet              Float
+  pyNet              Float?
+  accountType        String?
+
+  @@map("tb_accounts")
+}
+
+/// Saved per client — reused year-on-year (validTo = null means current)
+model AccountMapping {
+  id               String   @id @default(cuid())
+  clientId         String
+  client           Client   @relation(fields: [clientId], references: [id])
+  accountCode      String
+  /// Lead schedule code A-W
+  leadScheduleCode String
+  leadLineCode     String
+  /// +1 debit-positive, -1 credit-positive
+  signConvention   Int
+  mappedBy         String
+  mappedAt         DateTime @default(now())
+  validFrom        DateTime @default(now())
+  validTo          DateTime?
+
+  @@map("account_mappings")
+}
+
+model AdjustingJournalEntry {
+  id              String     @id @default(cuid())
+  engagementId    String
+  engagement      Engagement @relation(fields: [engagementId], references: [id])
+  ajeNumber       Int
+  description     String
+  status          AjeStatus  @default(PROPOSED)
+  proposedBy      String
+  proposedByUser  User       @relation("ProposedBy", fields: [proposedBy], references: [id])
+  proposedAt      DateTime   @default(now())
+  reviewedBy      String?
+  reviewedByUser  User?      @relation("ReviewedBy", fields: [reviewedBy], references: [id])
+  reviewedAt      DateTime?
+  /// Required when status = WAIVED — auto-added to Management Rep Appendix 1
+  waiverReason    String?
+
+  lines AjeLine[]
+
+  @@unique([engagementId, ajeNumber])
+  @@map("adjusting_journal_entries")
+}
+
+model AjeLine {
+  id          String                @id @default(cuid())
+  ajeId       String
+  aje         AdjustingJournalEntry @relation(fields: [ajeId], references: [id])
+  /// "DEBIT" | "CREDIT"
+  lineType    String
+  accountCode String
+  amount      Float
+  wpRef       String?
+
+  @@map("aje_lines")
+}
+
+model WorkingPaper {
+  id                    String     @id @default(cuid())
+  engagementId          String
+  engagement            Engagement @relation(fields: [engagementId], references: [id])
+  title                 String
+  /// Lead schedule area A-W (null for cross-cutting WPs)
+  areaCode              String?
+  status                WpStatus   @default(DRAFT)
+  /// FK to the current active version
+  currentVersionId      String?
+  requiredForCompletion Boolean    @default(false)
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  versions WorkingPaperVersion[]
+  comments ReviewComment[]
+
+  @@map("working_papers")
+}
+
+model WorkingPaperVersion {
+  id              String          @id @default(cuid())
+  workingPaperId  String
+  workingPaper    WorkingPaper    @relation(fields: [workingPaperId], references: [id])
+  versionNumber   Int
+  /// AES-256-GCM encrypted path — NEVER served directly by Nginx
+  filePath        String
+  encryptionKeyRef String
+  originalFilename String
+  mimeType        String
+  fileSizeBytes   Int
+  /// "PENDING" | "CLEAN" | "INFECTED"
+  virusScanStatus String          @default("PENDING")
+  virusScanAt     DateTime?
+  versionStatus   WpVersionStatus @default(CURRENT)
+  uploadedBy      String
+  uploadedByUser  User            @relation(fields: [uploadedBy], references: [id])
+  uploadedAt      DateTime        @default(now())
+  /// 7-year retention per ICPAK / ISQM 1 requirements
+  retentionExpiresAt DateTime
+
+  @@map("working_paper_versions")
+}
+
+/// INSERT-ONLY — no UPDATE or DELETE at DB layer (enforced by PostgreSQL GRANT)
+model ReviewComment {
+  id             String       @id @default(cuid())
+  workingPaperId String
+  workingPaper   WorkingPaper @relation(fields: [workingPaperId], references: [id])
+  versionId      String?
+  commenterId    String
+  commenter      User         @relation(fields: [commenterId], references: [id])
+  commentText    String
+  createdAt      DateTime     @default(now())
+  /// Resolved by a later INSERT marking resolution — not an UPDATE
+  resolvedAt     DateTime?
+  resolvedBy     String?
+  resolutionNote String?
+
+  @@map("review_comments")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FS FRAMEWORK TEMPLATES (Module 2)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// Admin-seeded FS line definitions per framework
+model FsLineTemplate {
+  id              String      @id @default(cuid())
+  framework       FsFramework
+  /// "BS" | "PL" | "CF" | "SOCE" | "OCI"
+  statement       String
+  lineCode        String
+  lineDescription String
+  /// Lead schedule code that feeds this line
+  leadScheduleCode String
+  sortOrder       Int
+  isSubtotal      Boolean     @default(false)
+  isTotal         Boolean     @default(false)
+  /// Sign: +1 or -1 (assets are +, liabilities are -)
+  signConvention  Int         @default(1)
+
+  @@unique([framework, statement, lineCode])
+  @@map("fs_line_templates")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTES TO FINANCIAL STATEMENTS
+// Numerical notes: computed on-the-fly from lead schedules (see AMS_PROJECT_CONTEXT.md)
+// Narrative notes: typed/pasted into preset fields here before finalisation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model NotesNarrative {
+  id           String     @id @default(cuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  /// e.g. "ACCOUNTING_POLICIES" | "GOING_CONCERN" | "SUBSEQUENT_EVENTS" | "CONTINGENCIES"
+  noteCode     String
+  noteTitle    String
+  /// Partner pastes or types approved narrative here before finalisation
+  narrativeText String?
+  updatedBy    String?
+  updatedAt    DateTime   @updatedAt
+  /// Locked at engagement finalisation — no further edits
+  lockedAt     DateTime?
+  lockedBy     String?
+  lockedByUser User?      @relation(fields: [lockedBy], references: [id])
+
+  @@unique([engagementId, noteCode])
+  @@map("notes_narrative")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PHASE 5 — COMPLETION (Modules 18–22)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// ISA 220 / P009 — required for GTN and MGTN engagements
+model EqrRecord {
+  id           String     @id @default(cuid())
+  engagementId String     @unique
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  reviewerId   String
+  reviewer     User       @relation(fields: [reviewerId], references: [id])
+
+  partA Json? // Engagement identity confirmation
+  partB Json? // Independence confirmation
+  partC Json? // Planning review
+  partD Json? // Significant judgments review
+  partE Json? // Independence + FS review
+  partF Json? // Matters raised log
+  partG Json? // Safeguards applied
+  partH Json? // Final sign-off
+
+  signedOffAt DateTime?
+  /// System validates: signedOffAt ≤ reportDate
+  reportDate  DateTime?
+
+  @@map("eqr_records")
+}
+
+/// Three sequential gates — report sign-off disabled until Gate 3 passes
+model CompletionGate {
+  id           String     @id @default(cuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  /// 1 | 2 | 3
+  gateNumber   Int
+  status       GateStatus @default(PENDING)
+  checkedAt    DateTime?
+  /// JSON array of {check, reason} for each failure
+  failures     Json?
+
+  @@unique([engagementId, gateNumber])
+  @@map("completion_gates")
+}
+
+model AuditReport {
+  id                String     @id @default(cuid())
+  engagementId      String     @unique
+  engagement        Engagement @relation(fields: [engagementId], references: [id])
+  reportType        ReportType
+  modificationBasis String?
+  reportText        String?
+  signedBy          String?
+  signedAt          DateTime?
+  /// AES-256-GCM encrypted PDF path
+  pdfPath           String?
+  encryptionKeyRef  String?
+
+  @@map("audit_reports")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CROSS-CUTTING (Modules 23–25)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// INSERT-ONLY — no UPDATE or DELETE ever. Enforced by PostgreSQL GRANT.
+/// Records every login, upload, download, state change, AJE, override.
+model AuditLog {
+  id          String    @id @default(cuid())
+  actorId     String?
+  actor       User?     @relation(fields: [actorId], references: [id])
+  actionType  String    // LOGIN | LOGOUT | UPLOAD | DOWNLOAD | WP_STATUS_CHANGE | AJE_PROPOSED | AJE_AGREED | AJE_WAIVED | GATE_CHECK | etc.
+  entityType  String?
+  entityId    String?
+  beforeState Json?
+  afterState  Json?
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime  @default(now())
+
+  @@map("audit_log")
+}
+
+model Notification {
+  id         String              @id @default(cuid())
+  userId     String
+  user       User                @relation(fields: [userId], references: [id])
+  trigger    NotificationTrigger
+  entityType String?
+  entityId   String?
+  message    String
+  isRead     Boolean             @default(false)
+  readAt     DateTime?
+  createdAt  DateTime            @default(now())
+  emailSentAt DateTime?
+
+  @@map("notifications")
+}
