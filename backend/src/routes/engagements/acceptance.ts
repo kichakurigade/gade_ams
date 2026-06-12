@@ -79,9 +79,27 @@ export default async function acceptanceRoutes(fastify: FastifyInstance) {
       },
     });
 
+    // preparedBy / reviewedBy / approvedBy / declinedBy are plain ID strings —
+    // resolve them to display names for the UI.
+    const userIds = [
+      acceptance?.preparedBy,
+      acceptance?.reviewedBy,
+      acceptance?.approvedBy,
+      acceptance?.declinedBy,
+    ].filter((id): id is string => !!id);
+    const users = userIds.length
+      ? await fastify.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, firstName: true, lastName: true },
+        })
+      : [];
+    const userNames = Object.fromEntries(
+      users.map((u) => [u.id, `${u.firstName} ${u.lastName}`])
+    );
+
     return reply.send({
       success: true,
-      data: { acceptance: acceptance ?? null },
+      data: { acceptance: acceptance ?? null, userNames },
     });
   });
 
@@ -283,6 +301,39 @@ export default async function acceptanceRoutes(fastify: FastifyInstance) {
         error: {
           code: 'INDEPENDENCE_NOT_CLEARED',
           message: 'All team members must declare independence before approval',
+        },
+      });
+    }
+
+    // KYC/AML gate (POCAMLA Cap. 59B) — engagement cannot advance to PLANNING
+    // without a completed KYC evaluation cleared to proceed.
+    const kyc = await fastify.prisma.kycAmlEvaluation.findUnique({
+      where: { engagementId },
+    });
+    if (!kyc?.completedAt) {
+      return reply.code(409).send({
+        success: false,
+        error: {
+          code: 'KYC_NOT_COMPLETED',
+          message: 'KYC/AML evaluation must be completed before acceptance approval',
+        },
+      });
+    }
+    if (kyc.riskDecision === 'DECLINE') {
+      return reply.code(409).send({
+        success: false,
+        error: {
+          code: 'KYC_DECLINED',
+          message: 'KYC/AML risk decision is DECLINE — engagement cannot be accepted',
+        },
+      });
+    }
+    if (kyc.epApprovalRequired && !kyc.epApprovedBy) {
+      return reply.code(409).send({
+        success: false,
+        error: {
+          code: 'KYC_EP_PENDING',
+          message: 'KYC/AML evaluation requires Engagement Partner approval before acceptance',
         },
       });
     }

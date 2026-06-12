@@ -150,6 +150,7 @@ export function AcceptanceFormClient({ engagementId }: { engagementId: string })
 
   const engagement = engData?.engagement;
   const acceptance = accData?.acceptance;
+  const userNames = accData?.userNames ?? {};
   const isLocked = !!acceptance?.approvedAt || !!acceptance?.declinedAt;
 
   // ─── Form setup ──────────────────────────────────────────────────────────
@@ -452,9 +453,24 @@ export function AcceptanceFormClient({ engagementId }: { engagementId: string })
               <h2 className="ams-section-title">Approval Workflow</h2>
             </div>
             <div className="px-5 py-4 space-y-3 text-sm">
-              <WorkflowStep label="Prepared" user={acceptance.preparedBy} date={acceptance.preparedAt} />
-              <WorkflowStep label="Reviewed" user={acceptance.reviewedBy} date={acceptance.reviewedAt} />
-              <WorkflowStep label="Approved" user={acceptance.approvedBy} date={acceptance.approvedAt} />
+              <WorkflowStep
+                label="Prepared"
+                user={acceptance.preparedBy}
+                userName={userNames[acceptance.preparedBy ?? '']}
+                date={acceptance.preparedAt}
+              />
+              <WorkflowStep
+                label="Reviewed"
+                user={acceptance.reviewedBy}
+                userName={userNames[acceptance.reviewedBy ?? '']}
+                date={acceptance.reviewedAt}
+              />
+              <WorkflowStep
+                label="Approved"
+                user={acceptance.approvedBy}
+                userName={userNames[acceptance.approvedBy ?? '']}
+                date={acceptance.approvedAt}
+              />
             </div>
           </div>
         )}
@@ -506,10 +522,12 @@ export function AcceptanceFormClient({ engagementId }: { engagementId: string })
 function WorkflowStep({
   label,
   user,
+  userName,
   date,
 }: {
   label: string;
   user?: string | null;
+  userName?: string;
   date?: string | null;
 }) {
   return (
@@ -528,6 +546,7 @@ function WorkflowStep({
       </div>
       <p className="text-muted-foreground">
         <span className="font-medium text-foreground">{label}</span>
+        {user && userName ? ` by ${userName}` : ''}
         {date ? ` — ${new Date(date).toLocaleDateString('en-KE')}` : ' — Pending'}
       </p>
     </div>

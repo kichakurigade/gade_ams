@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import acceptanceRoutes from './acceptance.js';
+import kycRoutes from './kyc.js';
+import teamRoutes from './team.js';
+import materialityRoutes from './materiality.js';
 
 export default async function engagementRoutes(fastify: FastifyInstance) {
   // All engagement routes require authentication
@@ -108,4 +111,13 @@ export default async function engagementRoutes(fastify: FastifyInstance) {
 
   // ─── Nested acceptance routes ──────────────────────────────────────────
   await fastify.register(acceptanceRoutes, { prefix: '/:engagementId/acceptance' });
+
+  // ─── Nested KYC/AML routes ─────────────────────────────────────────────
+  await fastify.register(kycRoutes, { prefix: '/:engagementId/kyc' });
+
+  // ─── Nested team routes ────────────────────────────────────────────────
+  await fastify.register(teamRoutes, { prefix: '/:engagementId/team' });
+
+  // ─── Nested materiality routes (Module 7) ──────────────────────────────
+  await fastify.register(materialityRoutes, { prefix: '/:engagementId/materiality' });
 }
