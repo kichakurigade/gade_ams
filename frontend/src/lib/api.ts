@@ -87,6 +87,49 @@ export const authApi = {
     api.get<{ user: LoginStep2Response['user'] }>('/auth/me'),
 };
 
+// ─── Clients ───────────────────────────────────────────────────────────────
+
+export const clientApi = {
+  list: () => api.get<{ clients: Client[] }>('/clients'),
+
+  create: (data: CreateClientInput) =>
+    api.post<{ client: Client }>('/clients', data),
+};
+
+export interface Client {
+  id: string;
+  clientCode: string;
+  clientName: string;
+  entityType?: string | null;
+  kraPin?: string | null;
+  registrationNo?: string | null;
+  industry?: string | null;
+  isActive: boolean;
+}
+
+export interface CreateClientInput {
+  clientCode: string;
+  clientName: string;
+  entityType?: string;
+  kraPin?: string;
+  registrationNo?: string;
+  industry?: string;
+}
+
+// ─── Users ─────────────────────────────────────────────────────────────────
+
+export interface UserSummary {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+}
+
+export const userApi = {
+  list: () => api.get<{ users: UserSummary[] }>('/users'),
+};
+
 // ─── Engagements ───────────────────────────────────────────────────────────
 
 export const engagementApi = {
@@ -98,7 +141,7 @@ export const engagementApi = {
     api.post<{ engagement: Engagement }>('/engagements', data),
 
   getAcceptance: (engagementId: string) =>
-    api.get<{ acceptance: AcceptanceRecord | null }>(
+    api.get<{ acceptance: AcceptanceRecord | null; userNames: Record<string, string> }>(
       `/engagements/${engagementId}/acceptance`
     ),
 
@@ -123,7 +166,86 @@ export const engagementApi = {
       `/engagements/${engagementId}/acceptance/decline`,
       { declineReason }
     ),
+
+  getKyc: (engagementId: string) =>
+    api.get<{ evaluation: KycEvaluation | null; userNames: Record<string, string> }>(
+      `/engagements/${engagementId}/kyc`
+    ),
+
+  submitKyc: (engagementId: string, data: KycSubmission) =>
+    api.post<KycResult>(`/engagements/${engagementId}/kyc/submit`, data),
+
+  epApproveKyc: (engagementId: string, data: EpApproveInput) =>
+    api.post<{ evaluation: KycEvaluation; engagementDeclined: boolean }>(
+      `/engagements/${engagementId}/kyc/ep-approve`,
+      data
+    ),
+
+  // ─── Team ───
+  getTeam: (engagementId: string) =>
+    api.get<{ members: TeamMember[] }>(`/engagements/${engagementId}/team`),
+
+  assignTeamMember: (engagementId: string, data: { userId: string; teamRole: string }) =>
+    api.post<{ member: TeamMember }>(`/engagements/${engagementId}/team`, data),
+
+  removeTeamMember: (engagementId: string, userId: string) =>
+    api.delete<{ member: TeamMember }>(`/engagements/${engagementId}/team/${userId}`),
+
+  // ─── Materiality (Module 7) ───
+  getMateriality: (engagementId: string) =>
+    api.get<{ active: MaterialityVersion | null; versions: MaterialityVersion[] }>(
+      `/engagements/${engagementId}/materiality`
+    ),
+
+  setMateriality: (engagementId: string, data: MaterialityInput) =>
+    api.post<{ version: MaterialityVersion }>(
+      `/engagements/${engagementId}/materiality`,
+      data
+    ),
 };
+
+export interface TeamMember {
+  id: string;
+  engagementId: string;
+  userId: string;
+  teamRole: string;
+  assignedAt: string;
+  removedAt?: string | null;
+  user: { id: string; firstName: string; lastName: string; role: string };
+}
+
+export interface MaterialityInput {
+  basis: string;
+  basisAmount: number;
+  basisPercentage: number;
+  pemPercentage: number;
+  trivialPercentage: number;
+  manualOverrideJustification?: string;
+  priorYearPbt?: number;
+  revisionReason?: string;
+}
+
+export interface MaterialityVersion {
+  id: string;
+  engagementId: string;
+  versionNumber: number;
+  isActive: boolean;
+  basis: string;
+  basisAmount: number;
+  basisPercentage: number;
+  pm: number;
+  pemPercentage: number;
+  pem: number;
+  trivialPercentage: number;
+  trivialAmount: number;
+  manualOverrideJustification?: string | null;
+  pbtVolatilityFlag: boolean;
+  setBy: string;
+  setAt: string;
+  supersededAt?: string | null;
+  revisionReason?: string | null;
+  user: { id: string; firstName: string; lastName: string };
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
@@ -195,4 +317,63 @@ export interface AcceptanceResult {
   riskClassification: string;
   eqrRequired: boolean;
   independenceCleared: boolean;
+}
+
+export interface AmlFactor {
+  factorCode: string;
+  factorName: string;
+  score: number;
+  notes?: string;
+}
+
+export interface KycSubmission {
+  uboName: string;
+  uboPinOrId?: string;
+  isPep: boolean;
+  pepDetails?: string;
+  unSanctionsCheck: boolean;
+  ofacSanctionsCheck: boolean;
+  sanctionsCleared: boolean;
+  amlFactors: AmlFactor[];
+  dataProtectionNoticeGiven: boolean;
+  dataProtectionNoticeDate?: string;
+}
+
+export interface KycEvaluation {
+  id: string;
+  engagementId: string;
+  clientId: string;
+  uboName?: string;
+  uboPinOrId?: string;
+  isPep: boolean;
+  pepDetails?: string;
+  unSanctionsCheck: boolean;
+  ofacSanctionsCheck: boolean;
+  sanctionsCleared: boolean;
+  sanctionsClearedAt?: string;
+  amlScore?: number;
+  amlFactors?: AmlFactor[];
+  riskDecision?: string;
+  epApprovalRequired: boolean;
+  epApprovedBy?: string;
+  epApprovedAt?: string;
+  dataProtectionNoticeGiven: boolean;
+  dataProtectionNoticeDate?: string;
+  completedBy?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KycResult {
+  evaluation: KycEvaluation;
+  amlScore: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  riskDecision: string;
+  epApprovalRequired: boolean;
+}
+
+export interface EpApproveInput {
+  overrideNotes: string;
+  riskDecision: 'PROCEED' | 'ENHANCED_MONITORING' | 'DECLINE';
 }
