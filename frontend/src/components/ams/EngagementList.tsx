@@ -39,7 +39,7 @@ export function EngagementListClient() {
           </p>
         </div>
         <Link
-          href="/dashboard/engagements/new"
+          href="/engagements/new"
           className="inline-flex items-center gap-2 px-4 py-2 bg-brand text-white rounded-lg text-sm font-medium hover:bg-brand-light transition-colors"
         >
           <Plus className="w-4 h-4" />
@@ -65,7 +65,7 @@ export function EngagementListClient() {
           {data.engagements.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground text-sm">
               No engagements yet.{' '}
-              <Link href="/dashboard/engagements/new" className="text-brand hover:underline">
+              <Link href="/engagements/new" className="text-brand hover:underline">
                 Create the first one.
               </Link>
             </div>
@@ -102,7 +102,7 @@ export function EngagementListClient() {
                   >
                     <td className="px-5 py-3.5">
                       <Link
-                        href={`/dashboard/engagements/${eng.id}`}
+                        href={`/engagements/${eng.id}/acceptance`}
                         className="font-medium text-foreground hover:text-brand"
                       >
                         {eng.engagementCode}

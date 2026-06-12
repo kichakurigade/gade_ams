@@ -13,11 +13,12 @@ import {
 import { cn } from '@/lib/utils';
 import { useCurrentUser, useLogout } from '@/hooks/useAuth';
 
+// (dashboard) is a route group — it does not appear in URLs.
 const NAV_ITEMS = [
-  { href: '/dashboard/engagements', label: 'Engagements', icon: FolderKanban },
-  { href: '/dashboard/clients', label: 'Clients', icon: Users },
-  { href: '/dashboard/procedures', label: 'Procedure Library', icon: BookOpen },
-  { href: '/dashboard/settings', label: 'Settings', icon: Settings },
+  { href: '/engagements', label: 'Engagements', icon: FolderKanban },
+  { href: '/clients', label: 'Clients', icon: Users },
+  { href: '/procedures', label: 'Procedure Library', icon: BookOpen },
+  { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export function Sidebar() {

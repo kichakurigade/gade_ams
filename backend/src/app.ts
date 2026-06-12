@@ -10,6 +10,8 @@ import multipartPlugin from './plugins/multipart.js';
 
 // Routes
 import authRoutes from './routes/auth/index.js';
+import clientRoutes from './routes/clients/index.js';
+import userRoutes from './routes/users/index.js';
 import engagementRoutes from './routes/engagements/index.js';
 
 export async function buildApp() {
@@ -33,6 +35,8 @@ export async function buildApp() {
 
   // ─── Routes ──────────────────────────────────────────────────────────────
   await fastify.register(authRoutes, { prefix: '/auth' });
+  await fastify.register(clientRoutes, { prefix: '/clients' });
+  await fastify.register(userRoutes, { prefix: '/users' });
   await fastify.register(engagementRoutes, { prefix: '/engagements' });
 
   // ─── Health check ────────────────────────────────────────────────────────
